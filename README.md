@@ -81,16 +81,27 @@ The application encrypts all stored credentials using a **master password–deri
 ## 📁 Project Structure
 
 .
+
 ├── main.py # Flask app, routes, encryption logic
+
 ├── init_db.py # Database initialization script
+
 ├── templates/
+
 │ ├── signin.html
+
 │ ├── signup.html
+
 │ ├── password_vault.html
+
 │ ├── add_password.html
+
 │ ├── update_password.html
+
 │ └── view_password.html
+
 └── README.md
+
 
 **Important Notes
 
