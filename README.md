@@ -81,27 +81,45 @@ The application encrypts all stored credentials using a **master password–deri
 ## 📁 Project Structure
 
 .
+
 ├── main.py # Flask app, routes, encryption logic
+
 ├── init_db.py # Database initialization script
+
 ├── templates/
+
 │ ├── signin.html
+
 │ ├── signup.html
+
 │ ├── password_vault.html
+
 │ ├── add_password.html
+
 │ ├── update_password.html
+
 │ └── view_password.html
+
 └── README.md
+
 
 **Important Notes
 
-This is a single-user learning project, not a commercial password manager.
-Losing the master password means permanent data loss.
-No password recovery mechanism exists by design.
+-->This is a single-user learning project, not a commercial password manager.
+
+-->Losing the master password means permanent data loss.
+
+-->No password recovery mechanism exists by design.
+
 
 **Learning Outcomes
 
-Practical use of modern cryptography
-Secure password handling principles
-Flask session management
-Full-stack CRUD application design
-Defense against plaintext data leaks
+-->Practical use of modern cryptography
+
+-->Secure password handling principles
+
+-->Flask session management
+
+-->Full-stack CRUD application design
+
+-->Defence against plaintext data leaks
