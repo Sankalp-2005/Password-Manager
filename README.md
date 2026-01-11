@@ -106,13 +106,20 @@ The application encrypts all stored credentials using a **master password–deri
 **Important Notes
 
 This is a single-user learning project, not a commercial password manager.
+
 Losing the master password means permanent data loss.
+
 No password recovery mechanism exists by design.
+
 
 **Learning Outcomes
 
 Practical use of modern cryptography
+
 Secure password handling principles
+
 Flask session management
+
 Full-stack CRUD application design
+
 Defense against plaintext data leaks
