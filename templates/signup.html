@@ -1,21 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Character encoding for correct text rendering -->
   <meta charset="UTF-8" />
+
+  <!-- Page title shown in browser tab -->
   <title>Sign Up</title>
+
+  <!-- Responsive viewport for mobile & desktop -->
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Bootstrap 5 -->
+  <!-- Bootstrap CSS for layout, grid, and components -->
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
     rel="stylesheet"
   />
+
+  <!-- Bootstrap Icons for eye icon and UI symbols -->
   <link
     href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css"
     rel="stylesheet"
   />
 
   <style>
+    /* Full-screen centered layout with soft gradient background */
     body {
       min-height: 100vh;
       background: linear-gradient(135deg, #f1f3f5, #e9ecef);
@@ -24,6 +32,7 @@
       justify-content: center;
     }
 
+    /* Keyframe animation for blinking eye effect */
     @keyframes blink {
       0% { transform: scaleY(1); }
       40% { transform: scaleY(0.1); }
@@ -31,11 +40,13 @@
       100% { transform: scaleY(1); }
     }
 
+    /* Applied to eye icon when toggling visibility */
     .eye-blink {
       animation: blink 0.3s ease-in-out;
       transform-origin: center;
     }
 
+    /* Main authentication card styling */
     .auth-card {
       max-width: 480px;
       width: 100%;
@@ -45,25 +56,30 @@
       box-shadow: 0 15px 40px rgba(0, 0, 0, 0.08);
     }
 
+    /* Card heading emphasis */
     .auth-card h3 {
       font-weight: 700;
     }
 
+    /* Input field styling */
     .form-control {
       border-radius: 10px;
       padding: 12px;
     }
 
+    /* Primary button styling */
     .btn-main {
       border-radius: 10px;
       padding: 10px 32px;
       font-weight: 600;
     }
 
+    /* Smaller text size for generate password button */
     .btn-generate {
       font-size: 0.85rem;
     }
 
+    /* Bottom-right positioned flash alerts */
     .alert-bottom-right {
       position: fixed;
       bottom: 20px;
@@ -76,23 +92,37 @@
 
 <body>
 
-  <!-- FLASH MESSAGES -->
+  <!-- ================= FLASH MESSAGES ================= -->
+  <!-- Display server-side flash messages (success, danger, etc.) -->
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
-        <div class="alert alert-{{ category }} alert-dismissible fade show alert-bottom-right" role="alert">
+        <div
+          class="alert alert-{{ category }} alert-dismissible fade show alert-bottom-right"
+          role="alert"
+        >
+          <!-- Flash message text -->
           {{ message }}
+
+          <!-- Close button -->
           <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
       {% endfor %}
     {% endif %}
   {% endwith %}
 
+  <!-- ================= SIGN-UP CARD ================= -->
   <div class="auth-card text-center">
+    <!-- Heading -->
     <h3 class="mb-3">Create Account</h3>
+
+    <!-- Subtext -->
     <p class="text-muted mb-4">Join us in just a few seconds</p>
 
+    <!-- Sign-up form submits to /sign-up route -->
     <form action="/sign-up" method="POST">
+
+      <!-- Username input -->
       <div class="mb-3 text-start">
         <label class="form-label fw-semibold">Username</label>
         <input
@@ -104,6 +134,7 @@
         />
       </div>
 
+      <!-- Password input with visibility toggle -->
       <div class="mb-2 text-start">
         <label class="form-label fw-semibold">Password</label>
         <div class="input-group">
@@ -115,6 +146,8 @@
             placeholder="Enter password"
             required
           />
+
+          <!-- Eye icon button to toggle password visibility -->
           <button
             class="btn btn-outline-secondary"
             type="button"
@@ -125,6 +158,7 @@
         </div>
       </div>
 
+      <!-- Generate strong password button -->
       <div class="text-end mb-4">
         <button
           type="button"
@@ -135,11 +169,13 @@
         </button>
       </div>
 
+      <!-- Submit button -->
       <button type="submit" class="btn btn-dark btn-main w-100">
         Sign Up
       </button>
     </form>
 
+    <!-- Redirect to sign-in page -->
     <div class="mt-4">
       <span class="text-muted">Already have an account?</span>
       <a href="{{ url_for('sign_in') }}" class="fw-semibold text-decoration-none">
@@ -148,10 +184,11 @@
     </div>
   </div>
 
-  <!-- Bootstrap JS -->
+  <!-- Bootstrap JS (required for alerts, dismiss, etc.) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
+    /* ===== Toggle password visibility with blink animation ===== */
     function togglePassword() {
       const passwordInput = document.getElementById("password");
       const eyeIcon = document.getElementById("eyeIcon");
@@ -164,11 +201,13 @@
         eyeIcon.classList.replace("bi-eye-slash", "bi-eye");
       }
 
+      // Restart blink animation
       eyeIcon.classList.remove("eye-blink");
       void eyeIcon.offsetWidth;
       eyeIcon.classList.add("eye-blink");
     }
 
+    /* ===== Copy value to clipboard and clear after timeout ===== */
     function copyToClipboard(value, timeout = 10000) {
       navigator.clipboard.writeText(value).then(() => {
         setTimeout(() => {
@@ -177,6 +216,7 @@
       });
     }
 
+    /* ===== Fetch and autofill generated password ===== */
     function generatePassword() {
       fetch("/generate-password")
         .then(res => res.json())
@@ -185,16 +225,17 @@
           passwordInput.value = data.password;
           passwordInput.type = "text";
 
-          // ✅ COPY ON GENERATE
+          // Copy generated password immediately
           copyToClipboard(data.password);
 
+          // Hide password again after 2 seconds
           setTimeout(() => {
             passwordInput.type = "password";
           }, 2000);
         });
     }
 
-    // Auto-dismiss alerts
+    /* ===== Auto-dismiss flash alerts after 3 seconds ===== */
     setTimeout(() => {
       document.querySelectorAll(".alert").forEach(alert => {
         const bsAlert = bootstrap.Alert.getOrCreateInstance(alert);

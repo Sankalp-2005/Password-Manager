@@ -1,100 +1,157 @@
+# Argon2 low-level API for deriving cryptographic keys securely from passwords
 from argon2.low_level import hash_secret_raw, Type
+
+# AES-GCM authenticated encryption (confidentiality + integrity)
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+# Exception raised when AES-GCM authentication fails (wrong key / tampered data)
 from cryptography.exceptions import InvalidTag
-import secrets
-import string
-from IPython.core.formatters import _safe_repr
-from sqlalchemy.sql._typing import Nullable
-import os,json
-from flask.helpers import url_for
-from flask.helpers import redirect
-from flask import Flask, render_template, request,jsonify,flash,session
+
+# secrets: cryptographically secure random generator
+# string: predefined character sets
+# os: OS-level randomness and environment interaction
+# json: serialization/deserialization of Python objects
+import secrets, string, os, json
+
+# Flask core components
+from flask import Flask, render_template, request, jsonify, flash, session, redirect, url_for
+
+# ORM for database interaction
 from flask_sqlalchemy import SQLAlchemy
+
+# Used to preserve function metadata in decorators
 from functools import wraps
 
 
-ALL_CHARS = string.ascii_lowercase+string.ascii_uppercase+string.digits+"!@#$%^&*()-_=+[]{};:,.<>/?"
+# ===================== UTILITIES =====================
 
+# Character pool used for generating strong random passwords
+ALL_CHARS = (
+    string.ascii_lowercase +
+    string.ascii_uppercase +
+    string.digits +
+    "!@#$%^&*()-_=+[]{};:,.<>/?"
+)
+
+# Generates a 16-character cryptographically secure random password
 def generate_password():
     return "".join(secrets.choice(ALL_CHARS) for _ in range(16))
-def save_vault_to_db(user_id,vault,master_password):
+
+
+# Encrypts and saves the entire vault back into the database
+def save_vault_to_db(user_id, vault, master_password):
+    # Fetch the user record from the database
     user = User.query.get(user_id)
 
+    # Generate a fresh 12-byte nonce for AES-GCM
     nonce = os.urandom(12)
 
+    # Derive a 256-bit encryption key from the master password using Argon2id
     key = hash_secret_raw(
-        salt=user.salt,
-        secret=master_password,
-        time_cost=2,
-        hash_len=32,
-        memory_cost=1024,
-        type=Type.ID,
-        parallelism=2
+        salt=user.salt,              # User-specific salt stored in DB
+        secret=master_password,      # Master password provided during login
+        time_cost=2,                 # Argon2 time cost (iterations)
+        hash_len=32,                 # Output key length (32 bytes = 256 bits)
+        memory_cost=1024,            # Memory cost in KiB
+        type=Type.ID,                # Argon2id variant (recommended)
+        parallelism=2                # Number of parallel threads
     )
 
+    # Initialize AES-GCM with the derived key
     aesgcm = AESGCM(key)
-    plaintext = json.dumps(vault).encode()
-    ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 
+    # Encrypt the serialized vault (JSON → bytes)
+    ciphertext = aesgcm.encrypt(
+        nonce,
+        json.dumps(vault).encode(),
+        None
+    )
+
+    # Store nonce + ciphertext together in the database
     user.encrypted_blob = nonce + ciphertext
     db.session.commit()
 
+    # Explicitly delete key from memory
     del key
 
-#FLask App Creating
+
+# ===================== APP SETUP =====================
+
+# Create Flask application instance
 app = Flask(__name__)
+
+# Secret key for session signing (random each restart)
 app.secret_key = os.urandom(32)
 
-#Data base configuration
-app.config["SQLALCHEMY_DATABASE_URI"]="postgresql://postgres:7893@localhost:5432/test"
-# user = os.environ.get("DB_USER","postgres")
-# password = os.environ.get("DB_PASSWORD","7893")
-# host = os.environ.get("DB_HOST","localhost")
-# dbname=os.environ.get("DB_NAME","test")
-# app.config["SQLALCHEMY_DATABASE_URI"]=f"postgresql+psycopg2://{user}:{password}@{host}/{dbname}"
+# PostgreSQL database connection URI
+app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:7893@localhost:5432/test"
+
+# Disable SQLAlchemy event notifications (performance)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# Initialize SQLAlchemy with Flask app
+db = SQLAlchemy(app)
 
-db=SQLAlchemy(app)
 
+# ===================== MODELS =====================
+
+# User table definition
 class User(db.Model):
     __tablename__ = "users"
-    user_id=db.Column(db.Integer, primary_key=True)
-    user_name = db.Column(db.String(200), nullable=False, unique=True)
-    salt=db.Column(db.LargeBinary,nullable=False)
-    encrypted_blob=db.Column(db.LargeBinary, nullable=False)
 
-    def __repr__(self):
-        return f"{self.user_id}:{self.user_name}"
-    
+    # Primary key
+    user_id = db.Column(db.Integer, primary_key=True)
+
+    # Unique username
+    user_name = db.Column(db.String(200), nullable=False, unique=True)
+
+    # Random salt used for Argon2 key derivation
+    salt = db.Column(db.LargeBinary, nullable=False)
+
+    # Encrypted vault data (nonce + ciphertext)
+    encrypted_blob = db.Column(db.LargeBinary, nullable=False)
+
+
+# ===================== AUTH =====================
+
+# Decorator to protect routes that require authentication
 def login_required(view):
     @wraps(view)
-    def wrapped_view(*args, **kwargs):
+    def wrapped(*args, **kwargs):
+        # If user is not logged in
         if "user_id" not in session:
             flash("Please log in to continue", "danger")
             return redirect(url_for("sign_in"))
         return view(*args, **kwargs)
-    return wrapped_view
+    return wrapped
 
+
+# ===================== ROUTES =====================
+
+# Redirect root URL to sign-in page
 @app.route("/")
 def home():
     return redirect(url_for("sign_in"))
 
-@app.route("/sign-in",methods = ["GET","POST"])
+
+# ---------- SIGN IN ----------
+@app.route("/sign-in", methods=["GET", "POST"])
 def sign_in():
-    if request.method=="POST":
+    if request.method == "POST":
+        # Read credentials from form
         username = request.form["username"]
         password = request.form["password"].encode()
+
+        # Look up user by username
         user = User.query.filter_by(user_name=username).first()
-        if user is None:
-            flash("Invalid Username", "danger")
+        if not user:
+            flash("Invalid username", "danger")
             return redirect(url_for("sign_in"))
-        else:
-            salt=user.salt
-            nonce=user.encrypted_blob[:12]
-            ciphertext=user.encrypted_blob[12:]
-            key=hash_secret_raw(
-                salt=salt,
+
+        try:
+            # Derive key from provided password
+            key = hash_secret_raw(
+                salt=user.salt,
                 secret=password,
                 time_cost=2,
                 hash_len=32,
@@ -102,33 +159,54 @@ def sign_in():
                 type=Type.ID,
                 parallelism=2
             )
-            aesgcm=AESGCM(key)
-            try:
-                plaintext=aesgcm.decrypt(nonce,ciphertext,None)
-                vault = json.loads(plaintext.decode())
-            except InvalidTag:
-                flash("Incorrect Password", "danger")
-                return redirect(url_for("sign_in"))
-            del key
-            del password
-            session["user_id"] = user.user_id
-            session["vault"]= vault
-            session["master_password"] = request.form["password"].encode()
-            return redirect(url_for("password_vault"))
+
+            # Attempt to decrypt stored vault
+            aesgcm = AESGCM(key)
+            plaintext = aesgcm.decrypt(
+                user.encrypted_blob[:12],     # Extract nonce
+                user.encrypted_blob[12:],     # Extract ciphertext
+                None
+            )
+
+            # Deserialize vault JSON
+            vault = json.loads(plaintext.decode())
+
+        # Raised when password is incorrect or data is tampered
+        except InvalidTag:
+            flash("Incorrect password", "danger")
+            return redirect(url_for("sign_in"))
+
+        # Store authenticated session data
+        session["user_id"] = user.user_id
+        session["vault"] = vault
+        session["master_password"] = password
+
+        # Remove key from memory
+        del key
+
+        return redirect(url_for("password_vault"))
+
     return render_template("signin.html")
 
-@app.route("/sign-up",methods=["GET","POST"])
+
+# ---------- SIGN UP ----------
+@app.route("/sign-up", methods=["GET", "POST"])
 def sign_up():
-    if request.method=="POST":
-        username=request.form["username"]
-        existing_user = User.query.filter_by(user_name=username).first()
-        if existing_user:
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"].encode()
+
+        # Prevent duplicate usernames
+        if User.query.filter_by(user_name=username).first():
             flash("User already exists", "danger")
             return redirect(url_for("sign_up"))
-        password=request.form["password"].encode()
-        salt=os.urandom(16)
+
+        # Generate salt and nonce
+        salt = os.urandom(16)
         nonce = os.urandom(12)
-        key=hash_secret_raw(
+
+        # Derive encryption key
+        key = hash_secret_raw(
             salt=salt,
             secret=password,
             time_cost=2,
@@ -137,12 +215,17 @@ def sign_up():
             type=Type.ID,
             parallelism=2
         )
-        aesgcm=AESGCM(key)
-        vault={}
-        plaintext=json.dumps(vault).encode()
-        ciphertext=aesgcm.encrypt(nonce,plaintext,None)
-        encrypted_blob=nonce+ciphertext
-        user=User(
+
+        # Encrypt an empty vault
+        aesgcm = AESGCM(key)
+        encrypted_blob = nonce + aesgcm.encrypt(
+            nonce,
+            json.dumps({}).encode(),
+            None
+        )
+
+        # Create and store user
+        user = User(
             user_name=username,
             salt=salt,
             encrypted_blob=encrypted_blob
@@ -151,71 +234,106 @@ def sign_up():
         db.session.commit()
 
         flash("Account created successfully. Please sign in.", "success")
-        flash("Password Copied to Clipboard, Expires in 10 seconds!", "success")
+        flash("Password Copied to clipboard(expires in 10 seconds)", "success")
+
         return redirect(url_for("sign_in"))
+
     return render_template("signup.html")
 
-@app.route("/password-vault",methods=["GET","POST"])
+
+# ---------- VAULT ----------
+@app.route("/password-vault")
 @login_required
 def password_vault():
-    vault = session.get("vault", {})
-    if request.method=="POST":
-        return redirect(url_for("add_password"))
-    return render_template("password_vault.html", vault=vault)
+    # Render vault using session-stored decrypted data
+    return render_template(
+        "password_vault.html",
+        vault=session.get("vault", {})
+    )
 
-@app.route("/add-password",methods=["GET","POST"])
+
+# ---------- ADD PASSWORD ----------
+@app.route("/add-password", methods=["GET", "POST"])
 @login_required
 def add_password():
-    if request.method=="POST":
+    if request.method == "POST":
         site = request.form["site"]
         username = request.form["username"]
-        password=request.form["password"]
-        vault = session.get("vault",{})
-        vault[site]={
-            "username":username,
-            "password":password
+        password = request.form["password"]
+
+        # Update vault in session
+        vault = session.get("vault", {})
+        vault[site] = {
+            "username": username,
+            "password": password
         }
-        session["vault"]=vault
+        session["vault"] = vault
+
+        # Persist encrypted vault
         save_vault_to_db(
             session["user_id"],
             vault,
             session["master_password"]
         )
-        flash("Password Added Successfully","success")
+
+        flash("Password added, copied to clipboard (expires in 10 seconds)", "copy")
         return redirect(url_for("password_vault"))
+
     return render_template("add_password.html")
 
-@app.route("/update-password/<site>",methods=["GET","POST"])
+
+# ---------- UPDATE PASSWORD ----------
+@app.route("/update-password/<site>", methods=["GET", "POST"])
 @login_required
 def update_password(site):
-    vault = session.get("vault",{})
-    if site not in vault:
-        flash("Entery not found","danger")
-        return redirect(url_for("password_vault"))
-    if request.method=="POST":
-        vault[site]["username"]=request.form["username"]
-        vault[site]["password"]=request.form["password"]
-        session["vault"]=vault
-        save_vault_to_db(
-            session["user_id"],
-            vault,
-            session["master_password"]
-        )
-        flash("Password Updated Successfully","success")
-        flash(f"__COPY__{request.form['password']}", "copy")
-        return redirect(url_for("password_vault"))
-    
-    return render_template("update_password.html",site=site,data=vault[site])
+    vault = session.get("vault", {})
 
-@app.route("/view-password/<site>")
-@login_required
-def view_password(site):
-    vault=session.get("vault",{})
+    # Ensure entry exists
     if site not in vault:
         flash("Entry not found", "danger")
         return redirect(url_for("password_vault"))
-    return render_template("view_password.html",site=site,data=vault[site])
 
+    if request.method == "POST":
+        # Update stored credentials
+        vault[site]["username"] = request.form["username"]
+        vault[site]["password"] = request.form["password"]
+        session["vault"] = vault
+
+        # Save encrypted changes
+        save_vault_to_db(
+            session["user_id"],
+            vault,
+            session["master_password"]
+        )
+
+        flash("Password updated, copied to clipboard (expires in 10 seconds)", "copy")
+        return redirect(url_for("password_vault"))
+
+    return render_template(
+        "update_password.html",
+        site=site,
+        data=vault[site]
+    )
+
+
+# ---------- VIEW PASSWORD ----------
+@app.route("/view-password/<site>")
+@login_required
+def view_password(site):
+    vault = session.get("vault", {})
+
+    if site not in vault:
+        flash("Entry not found", "danger")
+        return redirect(url_for("password_vault"))
+
+    return render_template(
+        "view_password.html",
+        site=site,
+        data=vault[site]
+    )
+
+
+# ---------- DELETE PASSWORD ----------
 @app.route("/delete-password/<site>", methods=["POST"])
 @login_required
 def delete_password(site):
@@ -225,29 +343,37 @@ def delete_password(site):
         flash("Entry not found", "danger")
         return redirect(url_for("password_vault"))
 
+    # Remove entry
     del vault[site]
     session["vault"] = vault
+
+    # Save encrypted vault
     save_vault_to_db(
         session["user_id"],
         vault,
         session["master_password"]
     )
+
     flash("Password deleted successfully", "success")
     return redirect(url_for("password_vault"))
 
+
+# ---------- GENERATE PASSWORD ----------
 @app.route("/generate-password")
 def generate_password_api():
-    password = generate_password()
-    return jsonify({"password": password})
+    # API endpoint for frontend password generation
+    return jsonify({"password": generate_password()})
 
+
+# ---------- LOGOUT ----------
 @app.route("/logout")
 def logout():
+    # Clear session data
     session.clear()
     flash("Logged out successfully", "success")
     return redirect(url_for("sign_in"))
 
+
+# Run Flask development server
 if __name__ == "__main__":
-    app.run(debug=True)
-
-    
-
+    app.run(debug=False)
