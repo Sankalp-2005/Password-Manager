@@ -83,8 +83,13 @@ app = Flask(__name__)
 # Secret key for session signing (random each restart)
 app.secret_key = os.urandom(32)
 
-# PostgreSQL database connection URI
-app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:7893@localhost:5432/test"
+# PostgreSQL(With Render) database connection URI
+
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:7893@localhost:5432/test"
+)
+
 
 # Disable SQLAlchemy event notifications (performance)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
